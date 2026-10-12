@@ -374,7 +374,7 @@ def callback(call):
 def unknown(message):
     text = (message.text or "").lower().strip()
 
-    if text in ["привет", "привет!", "здравствуйте", "здравствуй", "добрый день"]:
+    if any(word in text for word in ["привет", "здравствуйте", "здравствуй", "добрый день"]):
         bot.send_message(
             message.chat.id,
             "👋 Привет! Добро пожаловать в Cutora!\n"
@@ -400,3 +400,4 @@ def unknown(message):
 if __name__ == "__main__":
     print("Cutora Bot запущен!")
     bot.infinity_polling(skip_pending=True)
+    

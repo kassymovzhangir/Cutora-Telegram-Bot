@@ -372,11 +372,29 @@ def callback(call):
 
 @bot.message_handler(func=lambda message: True)
 def unknown(message):
-    bot.send_message(
-        message.chat.id,
-        "Пожалуйста, используйте кнопки 👇",
-        reply_markup=main_menu(),
-    )
+    text = (message.text or "").lower().strip()
+
+    if text in ["привет", "привет!", "здравствуйте", "здравствуй", "добрый день"]:
+        bot.send_message(
+            message.chat.id,
+            "👋 Привет! Добро пожаловать в Cutora!\n"
+            "Я помогу выбрать мастера и записаться на стрижку 😊",
+            reply_markup=main_menu(),
+        )
+
+    elif "как дела" in text:
+        bot.send_message(
+            message.chat.id,
+            "😊 Всё отлично, спасибо! Готов помочь записаться ✂️",
+            reply_markup=main_menu(),
+        )
+
+    else:
+        bot.send_message(
+            message.chat.id,
+            "Пожалуйста, используйте кнопки 👇",
+            reply_markup=main_menu(),
+        )
 
 
 if __name__ == "__main__":

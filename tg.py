@@ -1,399 +1,384 @@
+
 import os
+import logging
 import telebot
 from telebot import types
 from dotenv import load_dotenv
+from supabase import create_client
 
-# Загружаем токен
-env_path = os.path.join(os.path.dirname(__file__), ".env")
-load_dotenv(env_path, override=True)
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
-TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = os.getenv("BOT_TOKEN", "").strip()
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "").strip()
 
-if not TOKEN:
-    raise ValueError("BOT_TOKEN не найден в файле .env")
+if not all((TOKEN, SUPABASE_URL, SUPABASE_KEY)):
+    raise ValueError("Проверьте BOT_TOKEN, SUPABASE_URL и SUPABASE_KEY в .env")
 
-TOKEN = TOKEN.strip()
+logging.basicConfig(level=logging.INFO)
 bot = telebot.TeleBot(TOKEN)
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-bookings = {}
-user_state = {}
+MASTERS = {
+    "arman": ("Арман", ["17:00", "18:30", "16:00"]),
+    "aigerim": ("Айгерим", ["19:00", "17:30", "18:00"]),
+    "daniyar": ("Данияр", ["19:00", "19:30", "20:00"]),
+}
 
 
-# =========================
-# ГЛАВНОЕ МЕНЮ
-# =========================
+def keyboard(*buttons):
+    kb = types.InlineKeyboardMarkup()
+    for title, action in buttons:
+        kb.add(types.InlineKeyboardButton(title, callback_data=action))
+    return kb
+
 
 def main_menu():
-    keyboard = types.InlineKeyboardMarkup()
-
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "✂️ Услуги и цены",
-            callback_data="services"
-        )
+    return keyboard(
+        ("✂️ Услуги и цены", "services"),
+        ("👤 Выбрать мастера", "masters"),
+        ("📅 Записаться", "booking"),
+        ("📋 Мои записи", "my_booking"),
     )
 
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "👤 Выбрать мастера",
-            callback_data="masters"
-        )
-    )
-
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "📅 Записаться",
-            callback_data="book"
-        )
-    )
-
-    return keyboard
-
-
-# =========================
-# МАСТЕРА
-# =========================
 
 def masters_menu():
-    keyboard = types.InlineKeyboardMarkup()
-
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "👤 Арман",
-            callback_data="master_arman"
-        )
+    return keyboard(
+        ("👤 Арман", "master:arman"),
+        ("👤 Айгерим", "master:aigerim"),
+        ("👤 Данияр", "master:daniyar"),
+        ("⬅️ Главное меню", "main"),
     )
 
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "👤 Айгерим",
-            callback_data="master_aigerim"
-        )
+
+def time_menu(master_key, mode="new", current_time=None):
+    name, slots = MASTERS[master_key]
+    buttons = []
+
+    for time in slots:
+        if mode == "move" and time == current_time:
+            continue
+
+        # Каждая кнопка содержит мастера и время.
+        buttons.append((time, f"slot:{mode}:{master_key}:{time}"))
+
+    back = "actions" if mode == "move" else "masters"
+    buttons.append(("⬅️ Назад", back))
+    return keyboard(*buttons)
+
+
+def actions_menu():
+    return keyboard(
+        ("🔄 Перенести запись", "reschedule"),
+        ("❌ Отменить запись", "cancel"),
+        ("🏠 Главное меню", "main"),
     )
 
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "👤 Данияр",
-            callback_data="master_daniyar"
-        )
+
+def booking_details(record):
+    return (
+        f"👤 Мастер: {record['master']}\n"
+        f"🕒 Время: {record['booking_time']}\n"
+        f"✂️ Услуга: {record['service']}"
     )
 
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "⬅️ Главное меню",
-            callback_data="main"
-        )
+
+def get_booking(user_id):
+    result = (
+        supabase.table("bookings")
+        .select("telegram_id,master,service,booking_time")
+        .eq("telegram_id", user_id)
+        .limit(1)
+        .execute()
     )
+    return result.data[0] if result.data else None
 
-    return keyboard
+
+def save_booking(user_id, master, time, service="Стрижка"):
+    supabase.table("bookings").upsert(
+        {
+            "telegram_id": user_id,
+            "master": master,
+            "service": service,
+            "booking_time": time,
+        },
+        on_conflict="telegram_id",
+    ).execute()
 
 
-# =========================
-# ВРЕМЯ
-# =========================
+def delete_booking(user_id):
+    supabase.table("bookings").delete().eq(
+        "telegram_id", user_id
+    ).execute()
 
-def time_menu():
-    keyboard = types.InlineKeyboardMarkup()
 
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "16:00",
-            callback_data="time_16"
+def show_booking(chat_id, user_id):
+    record = get_booking(user_id)
+
+    if record:
+        bot.send_message(
+            chat_id,
+            "У вас уже есть активная запись:\n\n"
+            + booking_details(record)
+            + "\n\nЧто хотите сделать с записью? 👇",
+            reply_markup=actions_menu(),
         )
-    )
-
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "17:00",
-            callback_data="time_17"
+    else:
+        bot.send_message(
+            chat_id,
+            "У вас нет активной записи.",
+            reply_markup=main_menu(),
         )
-    )
 
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "18:30",
-            callback_data="time_1830"
-        )
-    )
-
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "⬅️ Назад",
-            callback_data="back"
-        )
-    )
-
-    return keyboard
-
-
-# =========================
-# ДЕЙСТВИЯ С ЗАПИСЬЮ
-# =========================
-
-def booking_actions():
-    keyboard = types.InlineKeyboardMarkup()
-
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "🔄 Перенести запись",
-            callback_data="reschedule"
-        )
-    )
-
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "❌ Отменить запись",
-            callback_data="cancel"
-        )
-    )
-
-    keyboard.add(
-        types.InlineKeyboardButton(
-            "🏠 Главное меню",
-            callback_data="main"
-        )
-    )
-
-    return keyboard
-
-
-# =========================
-# /START
-# =========================
 
 @bot.message_handler(commands=["start"])
 def start(message):
-    user_id = message.from_user.id
-    user_state[user_id] = "main"
-
     bot.send_message(
         message.chat.id,
         "👋 Добро пожаловать в Cutora!\n\n"
         "Я помогу выбрать услугу, мастера и записаться "
         "в парикмахерскую.\n\n"
         "Выберите нужный раздел 👇",
-        reply_markup=main_menu()
+        reply_markup=main_menu(),
     )
 
 
-# =========================
-# ОБРАБОТКА КНОПОК
-# =========================
-
 @bot.callback_query_handler(func=lambda call: True)
 def callback(call):
-
     bot.answer_callback_query(call.id)
 
+    action = call.data or ""
     user_id = call.from_user.id
     chat_id = call.message.chat.id
 
-    # Услуги
-    if call.data == "services":
-
-        keyboard = types.InlineKeyboardMarkup()
-        keyboard.add(
-            types.InlineKeyboardButton(
-                "🏠 Главное меню",
-                callback_data="main"
+    try:
+        if action == "main":
+            bot.send_message(
+                chat_id,
+                "Выберите нужный раздел 👇",
+                reply_markup=main_menu(),
             )
-        )
 
-        bot.send_message(
-            chat_id,
-            "✂️ Услуги и цены:\n\n"
-            "Мужская стрижка — 7 000 ₸\n\n"
-            "Женская стрижка — 9 000 ₸\n\n"
-            "Классическая стрижка — 4 000 ₸",
-            reply_markup=keyboard
-        )
-
-    # Выбор мастера
-    elif call.data in ["masters", "book"]:
-
-        user_state[user_id] = "choose_master"
-
-        bot.send_message(
-            chat_id,
-            "Выберите мастера 👇",
-            reply_markup=masters_menu()
-        )
-
-    # Арман
-    elif call.data == "master_arman":
-
-        if user_id not in bookings:
-            bookings[user_id] = {}
-
-        bookings[user_id]["master"] = "Арман"
-        user_state[user_id] = "choose_time"
-
-        bot.send_message(
-            chat_id,
-            "👤 Мастер: Арман\n"
-            "На какое время вам удобно?",
-            reply_markup=time_menu()
-        )
-
-    # Айгерим
-    elif call.data == "master_aigerim":
-
-        if user_id not in bookings:
-            bookings[user_id] = {}
-
-        bookings[user_id]["master"] = "Айгерим"
-        user_state[user_id] = "choose_time"
-
-        bot.send_message(
-            chat_id,
-            "👤 Мастер: Айгерим\n"
-            "На какое время вам удобно?",
-            reply_markup=time_menu()
-        )
-
-    # Данияр
-    elif call.data == "master_daniyar":
-
-        if user_id not in bookings:
-            bookings[user_id] = {}
-
-        bookings[user_id]["master"] = "Данияр"
-        user_state[user_id] = "choose_time"
-
-        bot.send_message(
-            chat_id,
-            "👤 Мастер: Данияр\n"
-            "На какое время вам удобно?",
-            reply_markup=time_menu()
-        )
-
-    # Время
-    elif call.data in ["time_16", "time_17", "time_1830"]:
-
-        times = {
-            "time_16": "16:00",
-            "time_17": "17:00",
-            "time_1830": "18:30"
-        }
-
-        selected_time = times[call.data]
-
-        if user_id not in bookings:
-            bookings[user_id] = {}
-
-        # Перенос
-        if user_state.get(user_id) == "reschedule":
-
-            bookings[user_id]["time"] = selected_time
-
-            master = bookings[user_id].get(
-                "master",
-                "Не выбран"
+        elif action == "services":
+            bot.send_message(
+                chat_id,
+                "✂️ Услуги и цены:\n\n"
+                "Мужская стрижка — 7 000 ₸\n"
+                "Женская стрижка — 9 000 ₸\n"
+                "Классическая стрижка — 4 000 ₸",
+                reply_markup=keyboard(
+                    ("📅 Записаться", "booking"),
+                    ("⬅️ Главное меню", "main"),
+                ),
             )
+
+        elif action in ("masters", "booking"):
+            bot.send_message(
+                chat_id,
+                "👤 Выберите мастера 👇",
+                reply_markup=masters_menu(),
+            )
+
+        elif action.startswith("master:"):
+            master_key = action.split(":", 1)[1]
+
+            if master_key not in MASTERS:
+                bot.send_message(
+                    chat_id,
+                    "Мастер не найден.",
+                    reply_markup=masters_menu(),
+                )
+                return
+
+            name, slots = MASTERS[master_key]
 
             bot.send_message(
                 chat_id,
-                "✅ Запись перенесена!\n\n"
-                f"👤 Мастер: {master}\n"
-                f"🕘 Новое время: {selected_time}",
-                reply_markup=booking_actions()
+                f"👤 Мастер: {name}\n"
+                "На какое время вам удобно?",
+                reply_markup=time_menu(master_key),
             )
 
-            user_state[user_id] = "booked"
-            return
+        elif action.startswith("slot:"):
+            parts = action.split(":")
 
-        # Новая запись
-        bookings[user_id]["time"] = selected_time
-        bookings[user_id]["service"] = "Стрижка"
+            if len(parts) != 5:
+                bot.send_message(
+                    chat_id,
+                    "Выберите мастера заново.",
+                    reply_markup=masters_menu(),
+                )
+                return
 
-        master = bookings[user_id].get(
-            "master",
-            "Не выбран"
-        )
+            _, mode, master_key, hour, minute = parts
+            selected_time = f"{hour}:{minute}"
 
-        bot.send_message(
-            chat_id,
-            "✅ Запись подтверждена!\n\n"
-            f"👤 Мастер: {master}\n"
-            f"🕘 Время: {selected_time}\n"
-            "✂️ Стрижка\n\n"
-            "Спасибо за запись в Cutora!",
-            reply_markup=booking_actions()
-        )
+            if mode not in ("new", "move") or master_key not in MASTERS:
+                bot.send_message(
+                    chat_id,
+                    "Выберите мастера заново.",
+                    reply_markup=masters_menu(),
+                )
+                return
 
-        user_state[user_id] = "booked"
+            master, available_times = MASTERS[master_key]
 
-    # Перенос
-    elif call.data == "reschedule":
+            if selected_time not in available_times:
+                bot.send_message(
+                    chat_id,
+                    "Выберите время из списка.",
+                    reply_markup=time_menu(master_key, mode),
+                )
+                return
 
-        if user_id not in bookings:
+            existing = get_booking(user_id)
+
+            if mode == "move":
+                if not existing:
+                    bot.send_message(
+                        chat_id,
+                        "У вас нет активной записи.",
+                        reply_markup=main_menu(),
+                    )
+                    return
+
+                if existing["master"] != master:
+                    bot.send_message(
+                        chat_id,
+                        "Для переноса выберите время своего мастера.",
+                        reply_markup=actions_menu(),
+                    )
+                    return
+
+                save_booking(
+                    user_id,
+                    master,
+                    selected_time,
+                    existing["service"],
+                )
+
+                bot.send_message(
+                    chat_id,
+                    "✅ Запись перенесена!\n"
+                    f"👤 Мастер: {master}\n"
+                    f"🕒 Новое время: {selected_time}\n\n"
+                    "Выберите дальнейшее действие 👇",
+                    reply_markup=keyboard(
+                        ("🏠 Главное меню", "main")
+                    ),
+                )
+
+            else:
+                save_booking(user_id, master, selected_time)
+
+                bot.send_message(
+                    chat_id,
+                    "✅ Запись подтверждена!\n"
+                    f"👤 Мастер: {master}\n"
+                    f"🕒 Время: {selected_time}\n"
+                    "✂️ Стрижка\n"
+                    "Спасибо за запись в Cutora!\n\n"
+                    "Что хотите сделать с записью? 👇",
+                    reply_markup=actions_menu(),
+                )
+
+        elif action in ("my_booking", "actions"):
+            show_booking(chat_id, user_id)
+
+        elif action == "reschedule":
+            existing = get_booking(user_id)
+
+            if not existing:
+                bot.send_message(
+                    chat_id,
+                    "У вас нет активной записи.",
+                    reply_markup=main_menu(),
+                )
+                return
+
+            master_key = next(
+                (
+                    key
+                    for key, (name, slots) in MASTERS.items()
+                    if name == existing["master"]
+                ),
+                None,
+            )
+
+            if master_key is None:
+                bot.send_message(
+                    chat_id,
+                    "Мастер не найден.",
+                    reply_markup=main_menu(),
+                )
+                return
 
             bot.send_message(
                 chat_id,
-                "У вас нет активной записи.",
-                reply_markup=main_menu()
+                f"🔄 Перенос записи {existing['master']} "
+                f"{existing['booking_time']}\n\n"
+                "Выберите новое время для записи 👇",
+                reply_markup=time_menu(
+                    master_key,
+                    mode="move",
+                    current_time=existing["booking_time"],
+                ),
             )
 
-            return
+        elif action == "cancel":
+            existing = get_booking(user_id)
 
-        user_state[user_id] = "reschedule"
+            if existing:
+                delete_booking(user_id)
+                bot.send_message(
+                    chat_id,
+                    "✅ Запись отменена.\n\n"
+                    "Вернуться в главное меню? 👇",
+                    reply_markup=keyboard(
+                        ("🏠 Главное меню", "main")
+                    ),
+                )
+            else:
+                bot.send_message(
+                    chat_id,
+                    "У вас нет активной записи.",
+                    reply_markup=main_menu(),
+                )
 
-        bot.send_message(
-            chat_id,
-            "🔄 Перенос записи\n\n"
-            "Выберите новое время 👇",
-            reply_markup=time_menu()
-        )
-
-    # Отмена
-    elif call.data == "cancel":
-
-        if user_id in bookings:
-            del bookings[user_id]
-
-        user_state[user_id] = "main"
-
-        bot.send_message(
-            chat_id,
-            "❌ Запись отменена\n\n"
-            "Вернуться в главное меню? 👇",
-            reply_markup=main_menu()
-        )
-
-    # Назад
-    elif call.data == "back":
-
-        if user_state.get(user_id) == "reschedule":
-
-            user_state[user_id] = "booked"
-
+        elif action.startswith("time_") or action.startswith("master_"):
             bot.send_message(
                 chat_id,
-                "Что хотите сделать с записью? 👇",
-                reply_markup=booking_actions()
+                "Это кнопка из старой версии бота.\n"
+                "Выберите мастера заново 👇",
+                reply_markup=masters_menu(),
             )
 
         else:
-
-            user_state[user_id] = "choose_master"
-
             bot.send_message(
                 chat_id,
-                "Выберите мастера 👇",
-                reply_markup=masters_menu()
+                "Выберите действие из меню.",
+                reply_markup=main_menu(),
             )
 
-    # Главное меню
-    elif call.data == "main":
-
-        user_state[user_id] = "main"
-
+    except Exception:
+        logging.exception("Ошибка при обработке кнопки")
         bot.send_message(
             chat_id,
-            "Выберите нужный раздел 👇",
-            reply_markup=main_menu()
+            "⚠️ Не удалось выполнить действие. "
+            "Проверьте подключение к Supabase.",
+            reply_markup=main_menu(),
         )
 
 
-print("Cutora Bot запущен!")
-bot.infinity_polling(skip_pending=True)
+@bot.message_handler(func=lambda message: True)
+def unknown(message):
+    bot.send_message(
+        message.chat.id,
+        "Пожалуйста, используйте кнопки 👇",
+        reply_markup=main_menu(),
+    )
+
+
+if __name__ == "__main__":
+    print("Cutora Bot запущен!")
+    bot.infinity_polling(skip_pending=True)

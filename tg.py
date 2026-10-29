@@ -150,6 +150,20 @@ def show_booking(chat_id, user_id):
         bot.send_message(chat_id, 'У вас нет активной записи.', reply_markup=main_menu())
 
 
+def registration_command(message):
+    """Allow /start and /cancel even when a registration step is pending."""
+    command = (message.text or '').split(maxsplit=1)[0].split('@')[0].lower() if message.text else ''
+    if command not in ('/start', '/cancel'):
+        return False
+    bot.clear_step_handler_by_chat_id(message.chat.id)
+    if command == '/start':
+        send_welcome(message.chat.id)
+    else:
+        bot.send_message(message.chat.id, 'Регистрация отменена. Выберите нужный раздел 👇',
+                         reply_markup=main_menu())
+    return True
+
+
 def begin_registration(chat_id, user_id):
     existing = (supabase.table('cutora_masters').select('id,status')
                 .eq('telegram_id', user_id).limit(1).execute().data or [])
@@ -165,6 +179,8 @@ def begin_registration(chat_id, user_id):
 
 
 def register_master_name(message, user_id):
+    if registration_command(message):
+        return
     if message.from_user.id != user_id:
         return
     name = (message.text or '').strip()
@@ -177,6 +193,8 @@ def register_master_name(message, user_id):
 
 
 def register_master_phone(message, user_id, name):
+    if registration_command(message):
+        return
     if message.from_user.id != user_id:
         return
     phone = re.sub(r'[\s()\-]', '', (message.text or '').strip())
@@ -189,6 +207,8 @@ def register_master_phone(message, user_id, name):
 
 
 def register_master_specialization(message, user_id, name, phone):
+    if registration_command(message):
+        return
     if message.from_user.id != user_id:
         return
     specialization = (message.text or '').strip()
@@ -201,6 +221,8 @@ def register_master_specialization(message, user_id, name, phone):
 
 
 def register_master_times(message, user_id, name, phone, specialization):
+    if registration_command(message):
+        return
     if message.from_user.id != user_id:
         return
     raw = (message.text or '').strip()
@@ -289,13 +311,24 @@ def notify_master(master_id, text):
             logging.exception('Не удалось уведомить мастера')
 
 
-@bot.message_handler(commands=['start'])
-def start(message):
-    bot.clear_step_handler_by_chat_id(message.chat.id)
-    bot.send_message(message.chat.id,
+def send_welcome(chat_id):
+    bot.send_message(chat_id,
                      '👋 Добро пожаловать в Cutora!\n\n'
                      'Я помогу выбрать услугу, мастера и записаться в парикмахерскую.\n\n'
                      'Выберите нужный раздел 👇', reply_markup=main_menu())
+
+
+@bot.message_handler(commands=['start'])
+def start(message):
+    bot.clear_step_handler_by_chat_id(message.chat.id)
+    send_welcome(message.chat.id)
+
+
+@bot.message_handler(commands=['cancel'])
+def cancel_registration(message):
+    bot.clear_step_handler_by_chat_id(message.chat.id)
+    bot.send_message(message.chat.id, 'Регистрация отменена. Выберите нужный раздел 👇',
+                     reply_markup=main_menu())
 
 
 @bot.callback_query_handler(func=lambda call: True)
@@ -305,6 +338,8 @@ def callback(call):
     chat_id = call.message.chat.id
     user_id = call.from_user.id
     try:
+        if action in ('main', 'register_master'):
+            bot.clear_step_handler_by_chat_id(chat_id)
         if action == 'main':
             bot.send_message(chat_id, 'Выберите нужный раздел 👇', reply_markup=main_menu())
         elif action == 'services':

@@ -380,5 +380,5 @@ def unknown(message):
 
 if __name__ == "__main__":
     print("Cutora Bot запущен!")
+    bot.remove_webhook()
     bot.infinity_polling(skip_pending=True)
-    

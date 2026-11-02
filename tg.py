@@ -301,9 +301,9 @@ def callback(call):
         elif action in ('masters', 'booking'):
             rows = approved_masters()
             bot.send_message(chat_id,
-                             '👤 Выберите мастера 👇' if rows else
-                             'Пока нет подтверждённых мастеров. Регистрация доступна через главное меню.',
-                             reply_markup=masters_menu())
+           '👤 Выберите мастера 👇' if rows else
+           'Пока нет подтверждённых мастеров. Регистрация доступна через главное меню.',
+           reply_markup=masters_menu())
         elif action.startswith('master:'):
             master_id = int(action.split(':', 1)[1])
             master = get_master(master_id)
@@ -392,9 +392,7 @@ def callback(call):
                                  reply_markup=dates_menu(master_id, moving=moving))
                 return
             heading = '✅ Запись перенесена!' if moving else '✅ Запись подтверждена!'
-            demo_warning = ('\n\n⚠️ ДЕМО: мастер не привязан к реальному Telegram-аккаунту. '
-                            'Это тестовая запись, не подтверждение стрижки.'
-                            if not master.get('telegram_id') else '')
+            demo_warning = ''
             bot.send_message(chat_id,
                              f"{heading}\n👤 Мастер: {master['full_name']}\n"
                              f"📅 Дата: {target_day.strftime('%d.%m.%Y')}\n🕒 Время: {slot}\n"

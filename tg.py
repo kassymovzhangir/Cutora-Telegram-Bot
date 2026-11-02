@@ -18,8 +18,8 @@ if not all((TOKEN, SUPABASE_URL, SUPABASE_KEY)):
 logging.basicConfig(level=logging.INFO)
 bot = telebot.TeleBot(TOKEN)
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-# Данные старой таблицы bookings не удаляем; ниже сохранён просмотр/отмена старой записи.
-# Новые реальные записи создаются только в cutora_appointments.
+# Старую таблицу bookings не читаем и не изменяем.
+# Актуальные бронирования хранятся в cutora_appointments.
 DEFAULT_TIMES = ['17:00', '18:00', '19:00']
 def keyboard(*buttons):
     kb = types.InlineKeyboardMarkup()
@@ -72,10 +72,6 @@ def parse_times(master):
         except ValueError:
             pass
     return sorted(result)
-def get_legacy_booking(user_id):
-    rows = (supabase.table('bookings').select('telegram_id,master,service,booking_time')
-            .eq('telegram_id', user_id).limit(1).execute().data or [])
-    return rows[0] if rows else None
 def current_appointment(user_id):
     # Записи в прошлом не считаем активными.
     rows = (supabase.table('cutora_appointments').select('*')
@@ -240,13 +236,14 @@ def slots_menu(master_id, day, moving=False, exclude_appointment_id=None):
                  .gte('appointment_at', datetime.combine(start, time.min, TZ).isoformat())
                  .lt('appointment_at', datetime.combine(start + timedelta(days=1), time.min, TZ).isoformat())
                  .execute().data or [])
-    busy = {format_dt(row['appointment_at'])[-5:] for row in busy_rows
-            if row['id'] != exclude_appointment_id}
+    busy = {format_dt(row['appointment_at'])[-5:] for row in busy_rows}
+    current_slot = next((format_dt(row['appointment_at'])[-5:] for row in busy_rows
+                         if row['id'] == exclude_appointment_id), None)
     prefix = 'move' if moving else 'book'
     buttons = []
     for slot in times:
         dt = datetime.fromisoformat(f'{day}T{slot}:00').replace(tzinfo=TZ)
-        if slot in busy or dt <= datetime.now(TZ):
+        if slot in busy or slot == current_slot or dt <= datetime.now(TZ):
             continue
         buttons.append((f'🕒 {slot}', f'{prefix}:{master_id}:{day}:{slot.replace(":", "")}'))
     found = bool(buttons)
@@ -400,11 +397,7 @@ def callback(call):
         elif action in ('my_booking', 'actions'):
             show_booking(chat_id, user_id)
         elif action == 'cancel_legacy':
-            if get_legacy_booking(user_id):
-                supabase.table('bookings').delete().eq('telegram_id', user_id).execute()
-                bot.send_message(chat_id, '✅ Старая запись удалена.', reply_markup=main_menu())
-            else:
-                bot.send_message(chat_id, 'Старая запись не найдена.', reply_markup=main_menu())
+            bot.send_message(chat_id, '📋 Старая версия записи больше не используется. Откройте «Мои записи».', reply_markup=main_menu())
         elif action == 'cancel':
             booking = current_appointment(user_id)
             if booking:
@@ -416,10 +409,6 @@ def callback(call):
                     return
                 bot.send_message(chat_id, '✅ Запись отменена. Время снова свободно.', reply_markup=main_menu())
                 notify_master(booking['master_id'], f"❌ Клиент отменил запись на {format_dt(booking['appointment_at'])}.")
-            elif get_legacy_booking(user_id):
-                bot.send_message(chat_id, 'Это старая запись. Для удаления выберите кнопку ниже.',
-                                 reply_markup=keyboard(('🗑 Удалить старую запись', 'cancel_legacy'),
-                                                       ('🏠 Главное меню', 'main')))
             else:
                 bot.send_message(chat_id, 'У вас нет активной записи.', reply_markup=main_menu())
         elif action == 'reschedule':

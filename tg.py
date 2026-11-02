@@ -278,7 +278,7 @@ def dates_menu(master_id, moving=False):
     kb = types.InlineKeyboardMarkup()
     today = datetime.now(TZ).date()
     prefix = 'move_date' if moving else 'date'
-    for offset in range(14):
+    for offset in range(5):
         d = today + timedelta(days=offset)
         kb.add(types.InlineKeyboardButton(
             d.strftime('%d.%m.%Y'), callback_data=f'{prefix}:{master_id}:{d.isoformat()}'))
@@ -396,7 +396,7 @@ def callback(call):
             master_id = int(master_str)
             d = datetime.strptime(day, '%Y-%m-%d').date()
             booking = current_appointment(user_id) if moving else None
-            if (not 0 <= (d - datetime.now(TZ).date()).days < 14 or not get_master(master_id)
+            if (not 0 <= (d - datetime.now(TZ).date()).days < 5 or not get_master(master_id)
                     or (moving and (not booking or booking['master_id'] != master_id))):
                 bot.send_message(chat_id, 'Выберите мастера и дату заново.', reply_markup=masters_menu())
                 return
@@ -417,7 +417,7 @@ def callback(call):
             dt = datetime.fromisoformat(f'{day}T{slot}:00').replace(tzinfo=TZ)
             master = get_master(master_id)
             if (not master or slot not in parse_times(master) or
-                    not 0 <= (target_day - datetime.now(TZ).date()).days < 14 or
+                    not 0 <= (target_day - datetime.now(TZ).date()).days < 5 or
                     dt <= datetime.now(TZ)):
                 bot.send_message(chat_id, 'Это время недоступно. Выберите заново.', reply_markup=masters_menu())
                 return

@@ -120,39 +120,31 @@ def master_name(master_id):
     return m['full_name'] if m else 'Мастер'
 
 
+
 def show_booking(chat_id, user_id):
     booking = current_appointment(user_id)
-    if booking:
+
+    if booking is None:
         bot.send_message(
             chat_id,
-            'У вас есть активная запись:\n\n'
-            f"👤 Мастер: {master_name(booking['master_id'])}\n"
-            f"🕒 Дата и время: {format_dt(booking['appointment_at'])}\n"
-            f"✂️ Услуга: {booking['service']}\n\n"
-            'Что хотите сделать с записью? 👇',
-            reply_markup=actions_menu(),
+            '📋 У вас нет активной записи.\n\n'
+            'Вы пока не записались на стрижку.',
+            reply_markup=keyboard(
+                ('📅 Записаться', 'booking'),
+                ('🏠 Главное меню', 'main')
+            )
         )
         return
 
-    legacy = get_legacy_booking(user_id)
-    if legacy:
-        bot.send_message(
-            chat_id,
-            'Старая запись (без даты):\n\n'
-            f"👤 Мастер: {legacy['master']}\n"
-            f"🕒 Время: {legacy['booking_time']}\n"
-            f"✂️ Услуга: {legacy['service']}\n\n"
-            'Эта запись относится к прежней версии бота. Её можно отменить; '
-            'для настоящей записи выберите мастера заново.',
-            reply_markup=keyboard(
-                ('📅 Создать новую запись', 'booking'),
-                ('🗑 Удалить старую запись', 'cancel_legacy'),
-                ('🏠 Главное меню', 'main'),
-            ),
-        )
-    else:
-        bot.send_message(chat_id, 'У вас нет активной записи.', reply_markup=main_menu())
-
+    bot.send_message(
+        chat_id,
+        '✅ Ваша активная запись:\n\n'
+        f"👤 Мастер: {master_name(booking['master_id'])}\n"
+        f"📅 Дата и время: {format_dt(booking['appointment_at'])}\n"
+        f"✂️ Услуга: {booking['service']}\n\n"
+        'Что хотите сделать с записью? 👇',
+        reply_markup=actions_menu()
+    )
 
 def registration_command(message):
     """Allow /start and /cancel even when a registration step is pending."""

@@ -3,38 +3,29 @@ import re
 import logging
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
-
 import telebot
 from telebot import types
 from dotenv import load_dotenv
 from supabase import create_client
-
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 TOKEN = os.getenv('BOT_TOKEN', '').strip()
 SUPABASE_URL = os.getenv('SUPABASE_URL', '').strip()
 SUPABASE_KEY = os.getenv('SUPABASE_KEY', '').strip()
 ADMIN_IDS = {int(x.strip()) for x in os.getenv('ADMIN_IDS', '').split(',') if x.strip().isdigit()}
 TZ = ZoneInfo('Asia/Almaty')
-
 if not all((TOKEN, SUPABASE_URL, SUPABASE_KEY)):
     raise ValueError('Нужны BOT_TOKEN, SUPABASE_URL и SUPABASE_KEY в Railway Variables или .env')
-
 logging.basicConfig(level=logging.INFO)
 bot = telebot.TeleBot(TOKEN)
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-
 # Данные старой таблицы bookings не удаляем; ниже сохранён просмотр/отмена старой записи.
 # Новые реальные записи создаются только в cutora_appointments.
 DEFAULT_TIMES = ['17:00', '18:00', '19:00']
-
-
 def keyboard(*buttons):
     kb = types.InlineKeyboardMarkup()
     for title, action in buttons:
         kb.add(types.InlineKeyboardButton(title, callback_data=action))
     return kb
-
-
 def main_menu():
     return keyboard(
         ('✂️ Услуги и цены', 'services'),
@@ -43,34 +34,24 @@ def main_menu():
         ('📋 Мои записи', 'my_booking'),
         ('✂️ Зарегистрироваться как мастер', 'register_master'),
     )
-
-
 def actions_menu():
     return keyboard(
         ('🔄 Перенести запись', 'reschedule'),
         ('❌ Отменить запись', 'cancel'),
         ('🏠 Главное меню', 'main'),
     )
-
-
 def back_menu():
     return keyboard(('⬅️ Главное меню', 'main'))
-
-
 def get_master(master_id, approved=True):
     q = supabase.table('cutora_masters').select('*').eq('id', master_id)
     if approved:
         q = q.eq('status', 'approved')
     rows = q.limit(1).execute().data or []
     return rows[0] if rows else None
-
-
 def approved_masters():
     return (supabase.table('cutora_masters')
             .select('id,full_name,specialization,salon_name')
             .eq('status', 'approved').order('id').execute().data or [])
-
-
 def masters_menu():
     rows = approved_masters()
     if not rows:
@@ -78,8 +59,6 @@ def masters_menu():
     buttons = [('👤 ' + str(m['full_name']) + (' (ДЕМО)' if m.get('salon_name') == 'Cutora Demo' else ''), f"master:{m['id']}") for m in rows]
     buttons.append(('⬅️ Главное меню', 'main'))
     return keyboard(*buttons)
-
-
 def parse_times(master):
     raw = master.get('available_times')
     values = raw.split(',') if isinstance(raw, str) and raw.strip() else DEFAULT_TIMES
@@ -93,14 +72,10 @@ def parse_times(master):
         except ValueError:
             pass
     return sorted(result)
-
-
 def get_legacy_booking(user_id):
     rows = (supabase.table('bookings').select('telegram_id,master,service,booking_time')
             .eq('telegram_id', user_id).limit(1).execute().data or [])
     return rows[0] if rows else None
-
-
 def current_appointment(user_id):
     # Записи в прошлом не считаем активными.
     rows = (supabase.table('cutora_appointments').select('*')
@@ -108,22 +83,14 @@ def current_appointment(user_id):
             .gte('appointment_at', datetime.now(TZ).isoformat())
             .order('appointment_at').limit(1).execute().data or [])
     return rows[0] if rows else None
-
-
 def format_dt(value):
     dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
     return dt.astimezone(TZ).strftime('%d.%m.%Y в %H:%M')
-
-
 def master_name(master_id):
     m = get_master(master_id, approved=False)
     return m['full_name'] if m else 'Мастер'
-
-
-
 def show_booking(chat_id, user_id):
     booking = current_appointment(user_id)
-
     if booking is None:
         bot.send_message(
             chat_id,
@@ -135,7 +102,6 @@ def show_booking(chat_id, user_id):
             )
         )
         return
-
     bot.send_message(
         chat_id,
         '✅ Ваша активная запись:\n\n'
@@ -145,7 +111,6 @@ def show_booking(chat_id, user_id):
         'Что хотите сделать с записью? 👇',
         reply_markup=actions_menu()
     )
-
 def registration_command(message):
     """Allow /start and /cancel even when a registration step is pending."""
     command = (message.text or '').split(maxsplit=1)[0].split('@')[0].lower() if message.text else ''
@@ -160,8 +125,6 @@ def registration_command(message):
         bot.send_message(message.chat.id, 'Регистрация отменена. Выберите нужный раздел 👇',
                          reply_markup=main_menu())
     return True
-
-
 def begin_registration(chat_id, user_id):
     existing = (supabase.table('cutora_masters').select('id,status')
                 .eq('telegram_id', user_id).limit(1).execute().data or [])
@@ -174,8 +137,6 @@ def begin_registration(chat_id, user_id):
         return
     prompt = bot.send_message(chat_id, '✂️ Регистрация мастера Cutora\n\nВведите имя и фамилию:')
     bot.register_next_step_handler(prompt, register_master_name, user_id)
-
-
 def register_master_name(message, user_id):
     if registration_command(message):
         return
@@ -188,22 +149,18 @@ def register_master_name(message, user_id):
         return
     prompt = bot.send_message(message.chat.id, 'Введите номер телефона (например, +77011234567):')
     bot.register_next_step_handler(prompt, register_master_phone, user_id, name)
-
-
 def register_master_phone(message, user_id, name):
     if registration_command(message):
         return
     if message.from_user.id != user_id:
         return
-    phone = re.sub(r'[\s()\-]', '', (message.text or '').strip())
+    phone = re.sub(r'[\s()\\-]', '', (message.text or '').strip())
     if not re.fullmatch(r'\+?\d{10,15}', phone):
         prompt = bot.send_message(message.chat.id, 'Введите телефон из 10–15 цифр:')
         bot.register_next_step_handler(prompt, register_master_phone, user_id, name)
         return
     prompt = bot.send_message(message.chat.id, 'Укажите специализацию (например: мужские стрижки):')
     bot.register_next_step_handler(prompt, register_master_specialization, user_id, name, phone)
-
-
 def register_master_specialization(message, user_id, name, phone):
     if registration_command(message):
         return
@@ -216,8 +173,6 @@ def register_master_specialization(message, user_id, name, phone):
         return
     prompt = bot.send_message(message.chat.id, 'Укажите свободные часы через запятую, например: 17:00,18:30,19:00')
     bot.register_next_step_handler(prompt, register_master_times, user_id, name, phone, specialization)
-
-
 def register_master_times(message, user_id, name, phone, specialization):
     if registration_command(message):
         return
@@ -264,8 +219,6 @@ def register_master_times(message, user_id, name, phone, specialization):
     except Exception:
         logging.exception('Ошибка регистрации мастера')
         bot.send_message(message.chat.id, '❌ Не удалось сохранить заявку. Проверьте таблицу и попробуйте позже.')
-
-
 def dates_menu(master_id, moving=False):
     kb = types.InlineKeyboardMarkup()
     today = datetime.now(TZ).date()
@@ -276,8 +229,6 @@ def dates_menu(master_id, moving=False):
             d.strftime('%d.%m.%Y'), callback_data=f'{prefix}:{master_id}:{d.isoformat()}'))
     kb.add(types.InlineKeyboardButton('⬅️ Назад', callback_data='my_booking' if moving else 'masters'))
     return kb
-
-
 def slots_menu(master_id, day, moving=False, exclude_appointment_id=None):
     master = get_master(master_id)
     if not master:
@@ -301,8 +252,6 @@ def slots_menu(master_id, day, moving=False, exclude_appointment_id=None):
     found = bool(buttons)
     buttons.append(('⬅️ Выбрать дату', f'{"move_master" if moving else "master"}:{master_id}'))
     return keyboard(*buttons), found
-
-
 def notify_master(master_id, text):
     master = get_master(master_id, approved=False)
     if not master or not master.get('telegram_id'):
@@ -312,34 +261,24 @@ def notify_master(master_id, text):
         bot.send_message(int(master['telegram_id']), text)
     except Exception:
         logging.exception('Не удалось уведомить мастера %s', master_id)
-
-
 def send_welcome(chat_id):
     bot.send_message(chat_id,
                      '👋 Добро пожаловать в Cutora!\n\n'
                      'Я помогу выбрать услугу, мастера и записаться в парикмахерскую.\n\n'
                      'Выберите нужный раздел 👇', reply_markup=main_menu())
-
-
 @bot.message_handler(commands=['start'])
 def start(message):
     bot.clear_step_handler_by_chat_id(message.chat.id)
     send_welcome(message.chat.id)
-
-
 @bot.message_handler(commands=['master'])
 def master_command(message):
     bot.clear_step_handler_by_chat_id(message.chat.id)
     begin_registration(message.chat.id, message.from_user.id)
-
-
 @bot.message_handler(commands=['cancel'])
 def cancel_registration(message):
     bot.clear_step_handler_by_chat_id(message.chat.id)
     bot.send_message(message.chat.id, 'Регистрация отменена. Выберите нужный раздел 👇',
                      reply_markup=main_menu())
-
-
 @bot.callback_query_handler(func=lambda call: True)
 def callback(call):
     bot.answer_callback_query(call.id)
@@ -485,28 +424,49 @@ def callback(call):
                 bot.send_message(chat_id, 'У вас нет активной записи.', reply_markup=main_menu())
         elif action == 'reschedule':
             booking = current_appointment(user_id)
-            if booking:
-                bot.send_message(chat_id, '🔄 Перенос записи. Выберите новую дату:',
-                                 reply_markup=dates_menu(booking['master_id'], moving=True))
-            elif get_legacy_booking(user_id):
-                bot.send_message(chat_id, 'Старая запись без даты не переносится. '
-                                 'Вы можете создать новую запись, не удаляя старую.',
-                                 reply_markup=keyboard(('📅 Новая запись', 'booking'),
-                                                       ('🗑 Удалить старую запись', 'cancel_legacy')))
-            else:
+            if not booking:
                 bot.send_message(chat_id, 'У вас нет активной записи.', reply_markup=main_menu())
+                return
+
+            master_id = booking['master_id']
+            master = get_master(master_id)
+            if not master:
+                bot.send_message(chat_id, 'Мастер недоступен.', reply_markup=main_menu())
+                return
+
+            old_date = datetime.fromisoformat(
+                booking['appointment_at'].replace('Z', '+00:00')
+            ).astimezone(TZ).date()
+            today = datetime.now(TZ).date()
+
+            if 0 <= (old_date - today).days < 5:
+                kb, available = slots_menu(
+                    master_id, old_date.isoformat(), moving=True,
+                    exclude_appointment_id=booking['id']
+                )
+                bot.send_message(
+                    chat_id,
+                    '🔄 Перенос записи\n\n'
+                    f'👤 Мастер: {master_name(master_id)}\n'
+                    f'📅 Дата: {old_date.strftime("%d.%m.%Y")}\n\n'
+                    + ('Выберите новое свободное время 👇' if available
+                       else 'Другого свободного времени нет. Выберите другую дату.'),
+                    reply_markup=kb
+                )
+            else:
+                bot.send_message(
+                    chat_id, '🔄 Выберите новую дату для переноса:',
+                    reply_markup=dates_menu(master_id, moving=True)
+                )
+
         else:
             bot.send_message(chat_id, 'Выберите действие из меню.', reply_markup=main_menu())
     except Exception:
         logging.exception('Ошибка при обработке кнопки')
         bot.send_message(chat_id, '⚠️ Не удалось выполнить действие. Попробуйте ещё раз.', reply_markup=main_menu())
-
-
 @bot.message_handler(func=lambda message: True)
 def unknown(message):
     bot.send_message(message.chat.id, 'Пожалуйста, используйте кнопки 👇', reply_markup=main_menu())
-
-
 if __name__ == '__main__':
     print('Cutora Bot запущен!')
     bot.remove_webhook()

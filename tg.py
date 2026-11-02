@@ -249,10 +249,14 @@ def slots_menu(master_id, day, moving=False, exclude_appointment_id=None):
     found = bool(buttons)
     buttons.append(('⬅️ Выбрать дату', f'{"move_master" if moving else "master"}:{master_id}'))
     return keyboard(*buttons), found
-def notify_master(master_id, text):
+def notify_master(master_id, text, client_id=None):
     master = get_master(master_id, approved=False)
     if not master or not master.get('telegram_id'):
         logging.info('Мастер %s: нет Telegram ID, уведомление пропущено', master_id)
+        return
+    # Не дублируем уведомление в клиентском чате, если тестовый мастер
+    # привязан к тому же Telegram ID.
+    if client_id is not None and int(master['telegram_id']) == int(client_id):
         return
     try:
         bot.send_message(int(master['telegram_id']), text)
@@ -332,7 +336,10 @@ def callback(call):
                                        exclude_appointment_id=booking['id'] if booking else None)
             bot.send_message(chat_id,
                              f'📅 {d.strftime("%d.%m.%Y")}\n'
-                             + ('Выберите свободное время:' if available else 'Свободного времени нет. Выберите другую дату.'),
+                              + ('Выберите новое свободное время:' if available and moving else
+                                'Выберите свободное время:' if available else
+                                'Свободных часов нет. Ваша прежняя запись сохранена. Выберите другую дату.' if moving else
+                                'Свободного времени нет. Выберите другую дату.'),
                              reply_markup=kb)
         elif action.startswith(('book:', 'move:')):
             moving = action.startswith('move:')
@@ -393,7 +400,7 @@ def callback(call):
                              f"📅 Дата: {target_day.strftime('%d.%m.%Y')}\n🕒 Время: {slot}\n"
                              '✂️ Услуга: Стрижка' + demo_warning, reply_markup=actions_menu())
             verb = 'Перенос записи' if moving else 'Новая запись'
-            notify_master(master_id, f'📅 {verb}!\nДата: {target_day.strftime("%d.%m.%Y")}\nВремя: {slot}')
+            notify_master(master_id, f'📅 {verb}!\nДата: {target_day.strftime("%d.%m.%Y")}\nВремя: {slot}', client_id=user_id)
         elif action in ('my_booking', 'actions'):
             show_booking(chat_id, user_id)
         elif action == 'cancel_legacy':
@@ -408,7 +415,7 @@ def callback(call):
                     bot.send_message(chat_id, 'Запись уже изменена. Проверьте «Мои записи».', reply_markup=main_menu())
                     return
                 bot.send_message(chat_id, '✅ Запись отменена. Время снова свободно.', reply_markup=main_menu())
-                notify_master(booking['master_id'], f"❌ Клиент отменил запись на {format_dt(booking['appointment_at'])}.")
+                notify_master(booking['master_id'], f"❌ Клиент отменил запись на {format_dt(booking['appointment_at'])}.", client_id=user_id)
             else:
                 bot.send_message(chat_id, 'У вас нет активной записи.', reply_markup=main_menu())
         elif action == 'reschedule':
@@ -439,7 +446,9 @@ def callback(call):
                     f'👤 Мастер: {master_name(master_id)}\n'
                     f'📅 Дата: {old_date.strftime("%d.%m.%Y")}\n\n'
                     + ('Выберите новое свободное время 👇' if available
-                       else 'Другого свободного времени нет. Выберите другую дату.'),
+                       else f'На {old_date.strftime("%d.%m.%Y")} других свободных часов нет.\n'
+                            f'Ваша запись на {format_dt(booking["appointment_at"])} сохранена.\n'
+                            'Выберите другую дату для переноса.'),
                     reply_markup=kb
                 )
             else:
